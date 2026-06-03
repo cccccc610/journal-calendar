@@ -1334,6 +1334,9 @@ _supa.auth.onAuthStateChange(async (event, session) => {
     // 新用户上传本地数据；老用户拉取云端数据
     await _pushLocalIfNew();
     await _supaPull();
+    // 登录后跳转到当前年份 1 月
+    curYear  = new Date().getFullYear();
+    curMonth = 1;
     // 刷新内存中的 ENTRIES
     ENTRIES = loadEntries(curYear, curMonth);
     hideAuthOverlay();
