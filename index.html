@@ -822,9 +822,92 @@ label:first-child{margin-top:0}
   position:relative;z-index:1;
 }
 
+
+/* ===== Auth Overlay ===== */
+#authOverlay{
+  position:fixed;inset:0;z-index:9999;
+  background:linear-gradient(135deg,#FDF6EE 0%,#F0E6D0 100%);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Noto Serif SC',serif;
+}
+#authOverlay.hidden{display:none!important;}
+.auth-card{
+  background:#fff;border-radius:18px;padding:40px 36px;
+  width:360px;max-width:92vw;
+  box-shadow:0 8px 40px rgba(120,80,50,.13);
+  display:flex;flex-direction:column;gap:14px;align-items:stretch;
+}
+.auth-logo{
+  font-family:'Caveat',cursive;font-size:30px;
+  color:#D05A6E;text-align:center;letter-spacing:1px;margin-bottom:2px;
+}
+.auth-subtitle{
+  text-align:center;font-size:14px;color:#8a7060;margin-bottom:4px;
+}
+.auth-msg{
+  min-height:18px;font-size:13px;text-align:center;
+  color:#D05A6E;font-weight:500;
+}
+.auth-loading{
+  display:none;align-items:center;justify-content:center;
+  gap:8px;font-size:14px;color:#8a7060;padding:8px 0;
+}
+.auth-input{
+  width:100%;box-sizing:border-box;
+  padding:11px 14px;border:1.5px solid #D6C9B0;border-radius:10px;
+  font-size:15px;font-family:inherit;color:#4a3728;
+  background:#FDFAF6;outline:none;transition:border .2s;
+}
+.auth-input:focus{border-color:#D05A6E;}
+.auth-btn{
+  width:100%;padding:12px;border:none;border-radius:10px;
+  background:#D05A6E;color:#fff;font-size:16px;font-weight:700;
+  font-family:inherit;cursor:pointer;letter-spacing:1px;
+  transition:background .2s;margin-top:2px;
+}
+.auth-btn:hover{background:#b84d5e;}
+.auth-toggle{
+  text-align:center;font-size:13px;color:#8a7060;margin-top:2px;
+}
+.auth-toggle a{color:#D05A6E;cursor:pointer;text-decoration:underline;}
+#authUserBadge{
+  display:none;align-items:center;gap:8px;
+  background:#fff8f0;border:1.5px solid #e8d5c0;border-radius:22px;
+  padding:4px 14px 4px 8px;cursor:pointer;
+  font-size:13px;color:#5c3d2e;font-family:'Noto Serif SC',serif;
+  box-shadow:0 1px 4px rgba(120,80,50,.08);
+}
+#authUserBadge:hover{background:#fdf0e4;}
+.auth-avatar{
+  width:28px;height:28px;border-radius:50%;
+  background:linear-gradient(135deg,#D05A6E,#e8a87c);
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;color:#fff;font-weight:700;
+}
+
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
+<!-- ── V2 Auth Overlay ── -->
+<div id="authOverlay">
+  <div class="auth-card">
+    <div class="auth-logo">📓 手账日历</div>
+    <div class="auth-subtitle" id="authSubtitle">登录你的私人手账空间</div>
+    <div class="auth-msg" id="authMsg"></div>
+    <div id="authLoading" style="display:none" class="auth-loading">⟳ &nbsp;正在同步你的数据…</div>
+    <div id="authForm">
+      <input class="auth-input" type="email" id="authEmail" placeholder="邮箱地址" autocomplete="email" onkeydown="if(event.key==='Enter')authSubmit()">
+      <input class="auth-input" type="password" id="authPass" placeholder="密码（6位以上）" autocomplete="current-password" onkeydown="if(event.key==='Enter')authSubmit()">
+      <input class="auth-input" type="text" id="authName" placeholder="你的昵称" style="display:none" autocomplete="nickname" onkeydown="if(event.key==='Enter')authSubmit()">
+      <button class="auth-btn" id="authSubmitBtn" onclick="authSubmit()">登 录</button>
+    </div>
+    <div class="auth-toggle" id="authToggleText">
+      还没有账号？<a onclick="toggleAuthMode()">立即注册</a>
+    </div>
+  </div>
+</div>
+
 
 <!-- Top Nav -->
 <header id="top-nav">
@@ -838,6 +921,12 @@ label:first-child{margin-top:0}
         <img id="navAvatarFrame" class="cat-frame-overlay" src="" alt="">
       </div>
     </div>
+
+  <!-- V2 User Badge -->
+  <div id="authUserBadge">
+    <span class="u-name" id="authUserName"></span>
+    <span class="u-logout" onclick="authSignOut()">退出</span>
+  </div>
   </div>
   <div class="nav-year-group">
     <button class="year-btn" onclick="changeYear(-1)" title="上一年">‹</button>
@@ -1063,6 +1152,150 @@ label:first-child{margin-top:0}
 </div>
 
 <script>
+// ══════════════════════════════════════════
+//  V2 ── SUPABASE AUTH + DATA SYNC
+// ══════════════════════════════════════════
+const SUPA_URL = 'https://ybfjripvzoibpbgrfbvs.supabase.co';
+const SUPA_KEY = 'sb_publishable_-eAqQG0HYRAEldCVztaSmQ_lYsLirCH';
+const _supa    = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+
+let currentUser = null;
+let _authMode   = 'login';   // 'login' | 'register'
+
+// Keys to sync with Supabase (anything starting with these prefixes)
+const SYNC_PREFIXES = ['journal-', 'priorities-', 'notes-', 'cover-'];
+function _isSyncKey(k){ return SYNC_PREFIXES.some(p => k.startsWith(p)); }
+
+// ── Intercept localStorage.setItem → auto-push to cloud ──
+const _lsSet = localStorage.setItem.bind(localStorage);
+localStorage.setItem = function(key, value){
+  _lsSet(key, value);
+  if(currentUser && _isSyncKey(key)) _supaPush(key, value);
+};
+
+async function _supaPush(key, value){
+  await _supa.from('user_storage').upsert(
+    { user_id: currentUser.id, key, value, updated_at: new Date().toISOString() },
+    { onConflict: 'user_id,key' }
+  );
+}
+
+// ── Pull all user data from Supabase → localStorage ──
+async function _supaPull(){
+  if(!currentUser) return;
+  const { data } = await _supa
+    .from('user_storage')
+    .select('key,value')
+    .eq('user_id', currentUser.id);
+  if(data && data.length > 0){
+    data.forEach(({ key, value }) => _lsSet(key, value));
+  }
+}
+
+// ── First-time login: push existing local data to cloud ──
+async function _pushLocalIfNew(){
+  if(!currentUser) return;
+  const { data } = await _supa.from('user_storage')
+    .select('key').eq('user_id', currentUser.id).limit(1);
+  if(!data || data.length === 0){
+    const rows = [];
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(_isSyncKey(k)) rows.push({ user_id: currentUser.id, key: k,
+        value: localStorage.getItem(k), updated_at: new Date().toISOString() });
+    }
+    if(rows.length > 0)
+      await _supa.from('user_storage').upsert(rows, { onConflict: 'user_id,key' });
+  }
+}
+
+// ── Show / hide overlay ──
+function showAuthOverlay(){ document.getElementById('authOverlay').classList.remove('hidden'); }
+function hideAuthOverlay(){ document.getElementById('authOverlay').classList.add('hidden'); }
+
+// ── Toggle login ↔ register ──
+function toggleAuthMode(){
+  _authMode = _authMode === 'login' ? 'register' : 'login';
+  const reg = _authMode === 'register';
+  document.getElementById('authSubmitBtn').textContent  = reg ? '注 册' : '登 录';
+  document.getElementById('authSubtitle').textContent   = reg ? '创建你的私人手账空间' : '登录你的私人手账空间';
+  document.getElementById('authToggleText').innerHTML   = reg
+    ? '已有账号？<a onclick="toggleAuthMode()">直接登录</a>'
+    : '还没有账号？<a onclick="toggleAuthMode()">立即注册</a>';
+  document.getElementById('authName').style.display     = reg ? 'block' : 'none';
+  document.getElementById('authPass').setAttribute('autocomplete', reg ? 'new-password' : 'current-password');
+  _setAuthMsg('', '');
+}
+
+function _setAuthMsg(text, type){
+  const el = document.getElementById('authMsg');
+  el.textContent = text;
+  el.className   = 'auth-msg' + (type ? ' ' + type : '');
+}
+
+// ── Submit login / register ──
+async function authSubmit(){
+  const email = document.getElementById('authEmail').value.trim();
+  const pass  = document.getElementById('authPass').value;
+  const name  = document.getElementById('authName').value.trim();
+  const btn   = document.getElementById('authSubmitBtn');
+  if(!email || !pass){ _setAuthMsg('请填写邮箱和密码', 'error'); return; }
+  if(pass.length < 6){ _setAuthMsg('密码至少 6 位', 'error'); return; }
+  if(_authMode === 'register' && !name){ _setAuthMsg('请填写昵称', 'error'); return; }
+  btn.disabled = true; _setAuthMsg('', '');
+  if(_authMode === 'register'){
+    const { error } = await _supa.auth.signUp({
+      email, password: pass, options: { data: { display_name: name } }
+    });
+    if(error){ _setAuthMsg(error.message, 'error'); btn.disabled = false; }
+    else{
+      _setAuthMsg('✓ 注册成功！请查收邮件点击验证链接后再登录', 'success');
+      btn.disabled = false; toggleAuthMode();
+    }
+  } else {
+    const { error } = await _supa.auth.signInWithPassword({ email, password: pass });
+    if(error){ _setAuthMsg('邮箱或密码错误', 'error'); btn.disabled = false; }
+    // 成功后 onAuthStateChange 自动触发
+  }
+}
+
+// ── Sign out ──
+async function authSignOut(){
+  await _supa.auth.signOut();
+  // onAuthStateChange 会自动显示 overlay
+}
+
+// ── Auth state observer (主入口) ──
+_supa.auth.onAuthStateChange(async (event, session) => {
+  if(session && session.user){
+    currentUser = session.user;
+    // 显示加载状态
+    document.getElementById('authForm').style.display      = 'none';
+    document.getElementById('authToggleText').style.display= 'none';
+    document.getElementById('authLoading').style.display   = 'flex';
+    // 新用户上传本地数据；老用户拉取云端数据
+    await _pushLocalIfNew();
+    await _supaPull();
+    // 刷新内存中的 ENTRIES
+    ENTRIES = loadEntries(curYear, curMonth);
+    hideAuthOverlay();
+    // 更新头部用户名
+    const uname = currentUser.user_metadata?.display_name
+      || currentUser.email?.split('@')[0] || '用户';
+    document.getElementById('authUserName').textContent   = uname;
+    document.getElementById('authUserBadge').style.display= 'flex';
+    if(!localStorage.getItem('cover-name')) _lsSet('cover-name', uname);
+    renderAll(); syncNavAvatar();
+  } else {
+    currentUser = null;
+    document.getElementById('authUserBadge').style.display = 'none';
+    document.getElementById('authForm').style.display      = 'block';
+    document.getElementById('authToggleText').style.display= 'block';
+    document.getElementById('authLoading').style.display   = 'none';
+    showAuthOverlay();
+  }
+});
+
 // ══════════════════════════════════════════
 //  DATA
 // ══════════════════════════════════════════
@@ -2696,8 +2929,7 @@ document.getElementById('cover-modal').addEventListener('click', function(e){
 });
 
 
-renderAll();
-syncNavAvatar();
+// renderAll() + syncNavAvatar() are now called by auth observer after login
 
 
 </script>
