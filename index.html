@@ -848,6 +848,18 @@ label:first-child{margin-top:0}
   min-height:18px;font-size:13px;text-align:center;
   color:#D05A6E;font-weight:500;
 }
+.auth-msg.success{color:#4caf50;}
+.auth-msg.error{color:#D05A6E;}
+.auth-forgot{
+  text-align:right;margin-top:-6px;margin-bottom:2px;
+  font-size:12px;
+}
+.auth-forgot a{color:#b08a70;cursor:pointer;text-decoration:underline;}
+.auth-forgot a:hover{color:#D05A6E;}
+.auth-back{
+  text-align:center;font-size:13px;color:#8a7060;margin-top:2px;
+}
+.auth-back a{color:#D05A6E;cursor:pointer;text-decoration:underline;}
 .auth-loading{
   display:none;align-items:center;justify-content:center;
   gap:8px;font-size:14px;color:#8a7060;padding:8px 0;
@@ -899,6 +911,7 @@ label:first-child{margin-top:0}
     <div id="authForm">
       <input class="auth-input" type="email" id="authEmail" placeholder="邮箱地址" autocomplete="email" onkeydown="if(event.key==='Enter')authSubmit()">
       <input class="auth-input" type="password" id="authPass" placeholder="密码（6位以上）" autocomplete="current-password" onkeydown="if(event.key==='Enter')authSubmit()">
+      <div class="auth-forgot" id="authForgotLink"><a onclick="toggleResetMode()">忘记密码？</a></div>
       <input class="auth-input" type="text" id="authName" placeholder="你的昵称" style="display:none" autocomplete="nickname" onkeydown="if(event.key==='Enter')authSubmit()">
       <button class="auth-btn" id="authSubmitBtn" onclick="authSubmit()">登 录</button>
     </div>
@@ -1222,8 +1235,44 @@ function toggleAuthMode(){
   document.getElementById('authToggleText').innerHTML   = reg
     ? '已有账号？<a onclick="toggleAuthMode()">直接登录</a>'
     : '还没有账号？<a onclick="toggleAuthMode()">立即注册</a>';
+  document.getElementById('authToggleText').style.display = 'block';
   document.getElementById('authName').style.display     = reg ? 'block' : 'none';
+  document.getElementById('authPass').style.display     = 'block';
+  document.getElementById('authForgotLink').style.display = reg ? 'none' : 'block';
   document.getElementById('authPass').setAttribute('autocomplete', reg ? 'new-password' : 'current-password');
+  _setAuthMsg('', '');
+}
+
+function toggleResetMode(){
+  _authMode = 'reset';
+  document.getElementById('authSubmitBtn').textContent  = '发送重置邮件';
+  document.getElementById('authSubtitle').textContent   = '找回你的账号';
+  document.getElementById('authPass').style.display     = 'none';
+  document.getElementById('authName').style.display     = 'none';
+  document.getElementById('authForgotLink').style.display = 'none';
+  document.getElementById('authToggleText').style.display = 'none';
+  // 插入"返回登录"链接（仅插入一次）
+  if(!document.getElementById('authBackLink')){
+    const back = document.createElement('div');
+    back.id = 'authBackLink';
+    back.className = 'auth-back';
+    back.innerHTML = '<a onclick="backToLogin()">← 返回登录</a>';
+    document.getElementById('authForm').appendChild(back);
+  } else {
+    document.getElementById('authBackLink').style.display = 'block';
+  }
+  _setAuthMsg('输入注册邮箱，我们将发送重置链接', '');
+}
+
+function backToLogin(){
+  _authMode = 'login';
+  document.getElementById('authSubmitBtn').textContent  = '登 录';
+  document.getElementById('authSubtitle').textContent   = '登录你的私人手账空间';
+  document.getElementById('authPass').style.display     = 'block';
+  document.getElementById('authForgotLink').style.display = 'block';
+  document.getElementById('authToggleText').style.display = 'block';
+  if(document.getElementById('authBackLink'))
+    document.getElementById('authBackLink').style.display = 'none';
   _setAuthMsg('', '');
 }
 
@@ -1239,6 +1288,15 @@ async function authSubmit(){
   const pass  = document.getElementById('authPass').value;
   const name  = document.getElementById('authName').value.trim();
   const btn   = document.getElementById('authSubmitBtn');
+  if(_authMode === 'reset'){
+    if(!email){ _setAuthMsg('请填写邮箱地址', 'error'); return; }
+    btn.disabled = true; _setAuthMsg('', '');
+    const redirectURL = window.location.href.split('?')[0];
+    const { error } = await _supa.auth.resetPasswordForEmail(email, { redirectTo: redirectURL });
+    if(error){ _setAuthMsg(error.message, 'error'); }
+    else { _setAuthMsg('✓ 重置邮件已发送，请查收邮箱', 'success'); }
+    btn.disabled = false; return;
+  }
   if(!email || !pass){ _setAuthMsg('请填写邮箱和密码', 'error'); return; }
   if(pass.length < 6){ _setAuthMsg('密码至少 6 位', 'error'); return; }
   if(_authMode === 'register' && !name){ _setAuthMsg('请填写昵称', 'error'); return; }
