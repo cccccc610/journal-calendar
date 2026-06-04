@@ -905,7 +905,8 @@ label:first-child{margin-top:0}
 }
 
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"
+  onerror="window._supaLoadFailed=true;console.error('Supabase CDN failed to load')"></script>
 </head>
 <body>
 <!-- ── V2 Auth Overlay ── -->
@@ -1177,7 +1178,16 @@ label:first-child{margin-top:0}
 // ══════════════════════════════════════════
 const SUPA_URL = 'https://ybfjripvzoibpbgrfbvs.supabase.co';
 const SUPA_KEY = 'sb_publishable_-eAqQG0HYRAEldCVztaSmQ_lYsLirCH';
-const _supa    = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+let _supa = null;
+try {
+  if(window._supaLoadFailed || typeof window.supabase === 'undefined'){
+    throw new Error('Supabase SDK not available');
+  }
+  _supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+} catch(e){
+  window._supaLoadFailed = true;
+  console.error('Supabase init failed:', e);
+}
 
 let currentUser = null;
 let _authMode   = 'login';   // 'login' | 'register'
@@ -1291,6 +1301,7 @@ function _setAuthMsg(text, type){
 
 // ── Submit login / register ──
 async function authSubmit(){
+  if(!_supa){ _setAuthMsg('网络连接失败，请刷新页面重试', 'error'); return; }
   const email = document.getElementById('authEmail').value.trim();
   const pass  = document.getElementById('authPass').value;
   const name  = document.getElementById('authName').value.trim();
@@ -1326,43 +1337,67 @@ async function authSubmit(){
 
 // ── Sign out ──
 async function authSignOut(){
+  if(!_supa) return;
   await _supa.auth.signOut();
   // onAuthStateChange 会自动显示 overlay
 }
 
 // ── Auth state observer (主入口) ──
-_supa.auth.onAuthStateChange(async (event, session) => {
-  if(session && session.user){
-    currentUser = session.user;
-    // 显示加载状态
-    document.getElementById('authForm').style.display      = 'none';
-    document.getElementById('authToggleText').style.display= 'none';
-    document.getElementById('authLoading').style.display   = 'flex';
-    // 新用户上传本地数据；老用户拉取云端数据
-    await _pushLocalIfNew();
-    await _supaPull();
-    // 登录后跳转到当前年份 1 月
-    curYear  = new Date().getFullYear();
-    curMonth = 1;
-    // 刷新内存中的 ENTRIES
-    ENTRIES = loadEntries(curYear, curMonth);
-    hideAuthOverlay();
-    // 更新头部用户名
-    const uname = currentUser.user_metadata?.display_name
-      || currentUser.email?.split('@')[0] || '用户';
-    document.getElementById('authUserName').textContent   = uname;
-    document.getElementById('authUserBadge').style.display= 'flex';
-    if(!localStorage.getItem('cover-name')) _lsSet('cover-name', uname);
-    renderAll(); syncNavAvatar();
-  } else {
-    currentUser = null;
-    document.getElementById('authUserBadge').style.display = 'none';
-    document.getElementById('authForm').style.display      = 'block';
-    document.getElementById('authToggleText').style.display= 'block';
-    document.getElementById('authLoading').style.display   = 'none';
-    showAuthOverlay();
-  }
-});
+if(window._supaLoadFailed || !_supa){
+  // Supabase SDK 加载失败 → 显示错误提示 + 刷新按钮
+  document.getElementById('authMsg').innerHTML =
+    '⚠️ 网络加载失败，请<a onclick="location.reload()" style="color:#D05A6E;cursor:pointer;text-decoration:underline">刷新页面</a>重试';
+  document.getElementById('authMsg').className = 'auth-msg error';
+  document.getElementById('authForm').style.display = 'none';
+  document.getElementById('authToggleText').style.display = 'none';
+} else {
+  // 5 秒超时保底：Supabase 网络慢时，避免用户卡在空白页面
+  let _authReady = false;
+  const _authTimeoutId = setTimeout(()=>{
+    if(!_authReady){
+      console.warn('Supabase auth state timeout — showing login form');
+      document.getElementById('authForm').style.display       = 'block';
+      document.getElementById('authToggleText').style.display = 'block';
+      document.getElementById('authLoading').style.display    = 'none';
+      showAuthOverlay();
+    }
+  }, 5000);
+
+  _supa.auth.onAuthStateChange(async (event, session) => {
+    _authReady = true;
+    clearTimeout(_authTimeoutId);
+    if(session && session.user){
+      currentUser = session.user;
+      // 显示加载状态
+      document.getElementById('authForm').style.display      = 'none';
+      document.getElementById('authToggleText').style.display= 'none';
+      document.getElementById('authLoading').style.display   = 'flex';
+      // 新用户上传本地数据；老用户拉取云端数据
+      await _pushLocalIfNew();
+      await _supaPull();
+      // 登录后跳转到当前年份 1 月
+      curYear  = new Date().getFullYear();
+      curMonth = 1;
+      // 刷新内存中的 ENTRIES
+      ENTRIES = loadEntries(curYear, curMonth);
+      hideAuthOverlay();
+      // 更新头部用户名
+      const uname = currentUser.user_metadata?.display_name
+        || currentUser.email?.split('@')[0] || '用户';
+      document.getElementById('authUserName').textContent   = uname;
+      document.getElementById('authUserBadge').style.display= 'flex';
+      if(!localStorage.getItem('cover-name')) _lsSet('cover-name', uname);
+      renderAll(); syncNavAvatar();
+    } else {
+      currentUser = null;
+      document.getElementById('authUserBadge').style.display = 'none';
+      document.getElementById('authForm').style.display      = 'block';
+      document.getElementById('authToggleText').style.display= 'block';
+      document.getElementById('authLoading').style.display   = 'none';
+      showAuthOverlay();
+    }
+  });
+}
 
 // ══════════════════════════════════════════
 //  DATA
