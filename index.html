@@ -116,6 +116,13 @@ body{font-family:'Caveat',cursive;background:#F5F2EB;color:#2B1B17;min-height:10
 .priority-item.editable{cursor:text;outline:none}
 .priority-item.editable:focus{border-left-color:#D05A6E;background:#FFF5EE}  /* 今樣 */
 .priority-num{color:#F4A7B9;font-weight:700;flex-shrink:0}  /* 一斤染 */
+.ptext{flex:1;min-width:0;outline:none;}
+.ptext:empty::before{
+  content:attr(data-placeholder);
+  color:#cbbfb5;
+  font-style:italic;
+  pointer-events:none;
+}
 
 .notes-area{
   background:#FFFEF0;border-radius:8px;padding:10px;
@@ -1570,11 +1577,14 @@ function renderSidebar(){
 
 function renderMiniCal(){
   const mc = document.getElementById('miniCal');
-  const firstDay = new Date(curYear, curMonth-1, 1).getDay();
-  const daysInMonth = new Date(curYear, curMonth, 0).getDate();
-  const today = new Date();
-  const offset = (firstDay + 6) % 7;
-  const prevDays = new Date(curYear, curMonth-1, 0).getDate();
+  // 本月 始终显示真实当前月份，与主日历浏览位置无关
+  const today     = new Date();
+  const realYear  = today.getFullYear();
+  const realMonth = today.getMonth() + 1;
+  const firstDay  = new Date(realYear, realMonth-1, 1).getDay();
+  const daysInMonth = new Date(realYear, realMonth, 0).getDate();
+  const offset    = (firstDay + 6) % 7;
+  const prevDays  = new Date(realYear, realMonth-1, 0).getDate();
 
   let html = '<div class="mini-cal-grid"><div class="mini-cal-header">';
   ['M','T','W','T','F','S','S'].forEach(d=>{ html+=`<span>${d}</span>`; });
@@ -1586,8 +1596,8 @@ function renderMiniCal(){
   while(cells.length<35) cells.push({d:cells.length-daysInMonth-offset+1,type:'next'});
 
   cells.forEach(c=>{
-    const isToday = c.type==='cur' && curYear===today.getFullYear() && curMonth===today.getMonth()+1 && c.d===today.getDate();
-    const dateStr = `${curYear}-${String(curMonth).padStart(2,'0')}-${String(c.d).padStart(2,'0')}`;
+    const isToday = c.type==='cur' && c.d===today.getDate();
+    const dateStr = `${realYear}-${String(realMonth).padStart(2,'0')}-${String(c.d).padStart(2,'0')}`;
     const hasEntry = c.type==='cur' && !!ENTRIES[dateStr];
     let cls = 'mini-cal-day';
     if(c.type!=='cur') cls+=' other';
@@ -1602,21 +1612,26 @@ function renderMiniCal(){
 function renderPriorities(){
   const list = document.getElementById('priorityList');
   const raw = localStorage.getItem(`priorities-${curYear}-${curMonth}`);
-  const items = raw ? JSON.parse(raw) : ['学习新技能', '坚持运动', '记录每一天'];
+  const items = raw ? JSON.parse(raw) : ['', '', ''];
   list.innerHTML = '';
   items.forEach((txt,i)=>{
     const div = document.createElement('div');
     div.className = 'priority-item editable';
-    div.contentEditable = true;
-    div.innerHTML = `<span class="priority-num">${i+1}.</span><span>${txt}</span>`;
-    div.querySelector('span:last-child').contentEditable = true;
-    div.addEventListener('blur',savePriorities);
+    div.innerHTML = `<span class="priority-num">${i+1}.</span><span class="ptext">${txt}</span>`;
+    const span = div.querySelector('span.ptext');
+    span.contentEditable = 'true';
+    if(!txt) span.setAttribute('data-placeholder', '写下本月目标…');
+    span.addEventListener('input', ()=>{
+      span.removeAttribute('data-placeholder');
+      if(!span.textContent.trim()) span.setAttribute('data-placeholder','写下本月目标…');
+    });
+    span.addEventListener('blur', savePriorities);
     list.appendChild(div);
   });
 }
 
 function savePriorities(){
-  const items = [...document.querySelectorAll('.priority-item span:last-child')].map(s=>s.textContent.trim());
+  const items = [...document.querySelectorAll('.priority-item span.ptext')].map(s=>s.textContent.trim());
   localStorage.setItem(`priorities-${curYear}-${curMonth}`, JSON.stringify(items));
 }
 
